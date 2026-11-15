@@ -3,7 +3,7 @@ set -eu
 test "$(uname -m)" = aarch64
 test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.31'
 mkdir -p /tmp/ta990sa-cuda-probe /output /artifacts
-cp /source/probe.c /source/cuda_driver_minimal.h /source/Makefile /tmp/ta990sa-cuda-probe/
+cp /source/probe.c /source/compute_tests.c /source/compute_tests.h /source/cuda_driver_minimal.h /source/Makefile /tmp/ta990sa-cuda-probe/
 cp -R /source/tests /tmp/ta990sa-cuda-probe/tests
 cd /tmp/ta990sa-cuda-probe
 if ! make -j"${JOBS:-4}" all check > /artifacts/build.log 2>&1; then

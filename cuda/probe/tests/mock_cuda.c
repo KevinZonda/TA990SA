@@ -4,9 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 struct CUctx_st { int unused; };
 static struct CUctx_st mock_context;
+#ifndef OMIT_MEM_ALLOC
+static int allocation_count;
+#endif
+static int kernel_launched;
 
 static int mode(const char *name)
 {
@@ -77,7 +82,8 @@ CUresult cuCtxDestroy_v2(CUcontext context)
     trace("context_destroy");
     return mode("destroy_fail") ? 999 : 0;
 }
-CUresult cuCtxSynchronize(void) { return mode("sync_fail") ? 999 : 0; }
+CUresult cuCtxSynchronize(void)
+{ return mode("sync_fail") || (kernel_launched && mode("kernel_sync_fail")) ? 999 : 0; }
 CUresult cuMemGetInfo_v2(size_t *free_bytes, size_t *total_bytes)
 {
     *total_bytes = (size_t)32 * 1024 * 1024 * 1024;
@@ -89,6 +95,8 @@ CUresult cuMemAlloc_v2(CUdeviceptr *pointer, size_t bytes)
 {
     void *memory;
     trace("memory_allocate");
+    ++allocation_count;
+    if (mode("kernel_alloc_fail") && allocation_count == 3) return 2;
     if (mode("alloc_fail")) return 2;
     memory = malloc(bytes);
     if (!memory) return 2;
@@ -111,5 +119,51 @@ CUresult cuMemcpyDtoH_v2(void *destination, CUdeviceptr source, size_t bytes)
 {
     memcpy(destination, (void *)(uintptr_t)source, bytes);
     if (mode("corrupt_copy")) ((unsigned char *)destination)[bytes - 1] ^= 1;
+    return 0;
+}
+
+struct CUmod_st { int unused; };
+struct CUfunc_st { int unused; };
+static struct CUmod_st mock_module;
+static struct CUfunc_st mock_function;
+CUresult cuModuleLoadData(CUmodule *module, const void *image)
+{
+    (void)image;
+    trace("module_load");
+    if (mode("module_load_fail")) return 999;
+    *module = &mock_module;
+    return 0;
+}
+CUresult cuModuleGetFunction(CUfunction *function, CUmodule module, const char *name)
+{
+    (void)module;
+    if (strcmp(name, "vector_add")) return 500;
+    *function = &mock_function;
+    return 0;
+}
+CUresult cuModuleUnload(CUmodule module)
+{
+    (void)module;
+    trace("module_unload");
+    return mode("module_unload_fail") ? 999 : 0;
+}
+CUresult cuLaunchKernel(CUfunction function, unsigned int gx, unsigned int gy,
+                        unsigned int gz, unsigned int bx, unsigned int by,
+                        unsigned int bz, unsigned int shared, CUstream stream,
+                        void **arguments, void **extra)
+{
+    (void)function; (void)gy; (void)gz; (void)by; (void)bz;
+    (void)shared; (void)stream; (void)extra;
+    const float *a = (const float *)(uintptr_t)*(CUdeviceptr *)arguments[0];
+    const float *b = (const float *)(uintptr_t)*(CUdeviceptr *)arguments[1];
+    float *out = (float *)(uintptr_t)*(CUdeviceptr *)arguments[2];
+    unsigned int n = *(unsigned int *)arguments[3];
+    trace("kernel_launch");
+    kernel_launched = 1;
+    if (mode("launch_fail")) return 999;
+    if (mode("kernel_noop")) return 0;
+    for (unsigned int i = 0; i < n && i < gx * bx; ++i) out[i] = a[i] + b[i];
+    if (mode("kernel_corrupt")) out[n - 1] += 1;
+    if (mode("kernel_nan")) out[n - 1] = NAN;
     return 0;
 }

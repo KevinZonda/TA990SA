@@ -1,4 +1,5 @@
 #include "cuda_driver_minimal.h"
+#include "compute_tests.h"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -23,6 +24,8 @@ static void usage(FILE *out, const char *program)
 {
     fprintf(out,
             "Usage: %s [--library PATH] [--device N] [--bytes N] [--query-only]\n"
+            "       [--kernel-test] [--cublas-test] [--all-tests]\n"
+            "       [--nvrtc-library PATH] [--cublas-library PATH]\n"
             "       %s --help\n\n"
             "Default library: /usr/lib/libcuda.so.1\n"
             "Default device: 0. Default test size: 1048576 bytes (1 MiB).\n"
@@ -30,7 +33,11 @@ static void usage(FILE *out, const char *program)
             "--query-only initializes the driver and queries devices without\n"
             "creating a context or allocating device memory.\n"
             "The memory test performs a byte-for-byte HtoD/DtoH round trip.\n"
-            "No GPU kernel, CUDA Runtime API, cuBLAS, or cuDNN is tested.\n",
+            "--kernel-test compiles and runs a 4099-element vector addition.\n"
+            "--cublas-test verifies a small FP32 matrix multiplication.\n"
+            "--all-tests enables both; every result is checked on the CPU.\n"
+            "Compute tests cannot be combined with --query-only.\n"
+            "Default: memory test only. No cuDNN or performance test.\n",
             program, program);
 }
 
@@ -47,7 +54,7 @@ static int number(const char *text, unsigned long long max,
     return !errno && end && !*end && *value <= max;
 }
 
-static int load_symbol(void *library, void *destination, size_t size,
+int load_symbol(void *library, void *destination, size_t size,
                        const char *name, int required)
 {
     void *symbol;
@@ -76,7 +83,7 @@ static int load_symbol(void *library, void *destination, size_t size,
 #define OPTIONAL(member, name) \
     ((void)load_symbol(library, &api.member, sizeof(api.member), name, 0))
 
-static int cuda_ok(const struct cuda_api *api, CUresult result,
+int cuda_ok(const struct cuda_api *api, CUresult result,
                    const char *operation)
 {
     const char *name = "CUDA_ERROR_UNKNOWN";
@@ -96,6 +103,9 @@ static int cuda_ok(const struct cuda_api *api, CUresult result,
 int main(int argc, char **argv)
 {
     const char *library_path = "/usr/lib/libcuda.so.1";
+    const char *nvrtc_path = DEFAULT_NVRTC_LIBRARY;
+    const char *cublas_path = DEFAULT_CUBLAS_LIBRARY;
+    int kernel_test = 0, cublas_test = 0;
     int ordinal = 0, query_only = 0, status = EXIT_DEVICE;
     int count = 0, driver_version = 0;
     size_t bytes = DEFAULT_BYTES;
@@ -114,6 +124,18 @@ int main(int argc, char **argv)
             return 0;
         } else if (!strcmp(argv[i], "--query-only")) {
             query_only = 1;
+        } else if (!strcmp(argv[i], "--kernel-test")) {
+            kernel_test = 1;
+        } else if (!strcmp(argv[i], "--cublas-test")) {
+            cublas_test = 1;
+        } else if (!strcmp(argv[i], "--all-tests")) {
+            kernel_test = cublas_test = 1;
+        } else if (!strcmp(argv[i], "--nvrtc-library")) {
+            if (++i == argc || !argv[i][0]) goto invalid_usage;
+            nvrtc_path = argv[i];
+        } else if (!strcmp(argv[i], "--cublas-library")) {
+            if (++i == argc || !argv[i][0]) goto invalid_usage;
+            cublas_path = argv[i];
         } else if (!strcmp(argv[i], "--library")) {
             if (++i == argc || !argv[i][0]) goto invalid_usage;
             library_path = argv[i];
@@ -129,7 +151,8 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("CUDA probe (Driver API; no GPU kernel execution)\n");
+    if (query_only && (kernel_test || cublas_test)) goto invalid_usage;
+    printf("CUDA probe (Driver API; compute tests are opt-in)\n");
     printf("Library: %s\n", library_path);
     library = dlopen(library_path, RTLD_NOW | RTLD_LOCAL);
     if (!library) {
@@ -233,6 +256,14 @@ int main(int argc, char **argv)
         }
     }
     printf("Memory round-trip: PASS (%zu bytes verified)\n", bytes);
+    if (kernel_test) {
+        status = test_kernel(library, &api, selected_device, nvrtc_path);
+        if (status) goto cleanup;
+    }
+    if (cublas_test) {
+        status = test_cublas(&api, cublas_path);
+        if (status) goto cleanup;
+    }
     status = 0;
 
 cleanup:

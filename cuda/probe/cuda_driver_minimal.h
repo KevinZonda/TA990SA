@@ -11,6 +11,9 @@ typedef int CUresult;
 typedef int CUdevice;
 typedef unsigned long long CUdeviceptr;
 typedef struct CUctx_st *CUcontext;
+typedef struct CUmod_st *CUmodule;
+typedef struct CUfunc_st *CUfunction;
+typedef struct CUstream_st *CUstream;
 
 enum { CUDA_SUCCESS = 0 };
 
@@ -37,5 +40,9 @@ struct cuda_api {
     CUresult (*copy_host_to_device)(CUdeviceptr, const void *, size_t);
     CUresult (*copy_device_to_host)(void *, CUdeviceptr, size_t);
 };
+
+int load_symbol(void *library, void *destination, size_t size,
+                const char *name, int required);
+int cuda_ok(const struct cuda_api *api, CUresult result, const char *operation);
 
 #endif

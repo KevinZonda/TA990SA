@@ -3,6 +3,8 @@ set -eu
 PROBE=$1
 MOCK=$2
 NO_ALLOC=$3
+NVRTC=$4
+CUBLAS=$5
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 export MOCK_TRACE_FILE="$TMP/trace"
@@ -71,4 +73,64 @@ run_case negative_size 2 '' --bytes -1
 run_case negative_device 2 '' --device -1
 run_case missing_argument 2 '' --bytes
 run_case unknown_argument 2 '' --unknown
+
+compute_case() {
+    label=$1 expected=$2 mode=$3
+    shift 3
+    run_case "$label" "$expected" "$mode" --library "$MOCK" \
+        --nvrtc-library "$NVRTC" --cublas-library "$CUBLAS" "$@"
+}
+compute_case all_tests 0 '' --all-tests
+grep -q 'PTX target: compute_86 (GPU sm_87)' "$TMP/stdout"
+grep -q 'GPU vector addition: PASS (4099 FP32 results verified)' "$TMP/stdout"
+grep -q '221 FP32 results verified; max abs error 0)' "$TMP/stdout"
+test "$(grep -c '^memory_free$' "$MOCK_TRACE_FILE")" -eq 7
+grep -q '^module_unload$' "$MOCK_TRACE_FILE"
+grep -q '^nvrtc_destroy$' "$MOCK_TRACE_FILE"
+grep -q '^blas_destroy$' "$MOCK_TRACE_FILE"
+compute_case kernel_only 0 '' --kernel-test
+if grep -q '^blas_create$' "$MOCK_TRACE_FILE"; then exit 1; fi
+compute_case cublas_only 0 '' --cublas-test
+if grep -q '^nvrtc_create$' "$MOCK_TRACE_FILE"; then exit 1; fi
+compute_case query_conflict 2 '' --query-only --all-tests
+test ! -s "$MOCK_TRACE_FILE"
+compute_case missing_nvrtc 7 '' --kernel-test --nvrtc-library /not-present/libnvrtc.so
+compute_case missing_nvrtc_symbol 7 '' --kernel-test --nvrtc-library "$MOCK"
+compute_case missing_cublas 8 '' --cublas-test --cublas-library /not-present/libcublas.so
+compute_case missing_cublas_symbol 8 '' --cublas-test --cublas-library "$MOCK"
+compute_case no_compatible_arch 7 arch_none --kernel-test
+compute_case excessive_arch_count 7 arch_count_bad --kernel-test
+compute_case compilation_failure 7 compile_fail --kernel-test
+grep -q 'simulated compilation failure' "$TMP/stderr"
+grep -q '^nvrtc_destroy$' "$MOCK_TRACE_FILE"
+test "$(grep -c '^memory_free$' "$MOCK_TRACE_FILE")" -eq 1
+compute_case invalid_ptx_size 7 ptx_size_bad --kernel-test
+compute_case module_load_failure 7 module_load_fail --kernel-test
+if grep -q '^module_unload$' "$MOCK_TRACE_FILE"; then exit 1; fi
+compute_case partial_kernel_allocation 7 kernel_alloc_fail --kernel-test
+test "$(grep -c '^memory_free$' "$MOCK_TRACE_FILE")" -eq 2
+grep -q '^module_unload$' "$MOCK_TRACE_FILE"
+compute_case kernel_launch_failure 7 launch_fail --kernel-test
+test "$(grep -c '^memory_free$' "$MOCK_TRACE_FILE")" -eq 4
+grep -q '^context_destroy$' "$MOCK_TRACE_FILE"
+compute_case kernel_sync_failure 7 kernel_sync_fail --kernel-test
+grep -q '^module_unload$' "$MOCK_TRACE_FILE"
+compute_case kernel_tail_corruption 7 kernel_corrupt --kernel-test
+grep -q 'Kernel mismatch at element 4098' "$TMP/stderr"
+compute_case kernel_nan 7 kernel_nan --kernel-test
+compute_case kernel_did_not_execute 7 kernel_noop --kernel-test
+compute_case module_unload_failure 6 module_unload_fail --kernel-test
+grep -q '^nvrtc_destroy$' "$MOCK_TRACE_FILE"
+compute_case nvrtc_cleanup_failure 6 nvrtc_destroy_fail --kernel-test
+compute_case blas_create_failure 8 blas_create_fail --cublas-test
+if grep -q '^blas_destroy$' "$MOCK_TRACE_FILE"; then exit 1; fi
+compute_case blas_execution_failure 8 blas_sgemm_fail --cublas-test
+grep -q '^blas_destroy$' "$MOCK_TRACE_FILE"
+test "$(grep -c '^memory_free$' "$MOCK_TRACE_FILE")" -eq 4
+compute_case blas_tail_corruption 8 blas_corrupt --cublas-test
+grep -q 'cuBLAS mismatch at (16,12)' "$TMP/stderr"
+compute_case blas_nan 8 blas_nan --cublas-test
+compute_case blas_did_not_execute 8 blas_noop --cublas-test
+compute_case blas_cleanup_failure 6 blas_destroy_fail --cublas-test
+test "$(grep -c '^memory_free$' "$MOCK_TRACE_FILE")" -eq 4
 printf 'All %s mock-driver tests passed. No real GPU was used.\n' "$COUNT"

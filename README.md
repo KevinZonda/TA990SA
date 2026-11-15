@@ -79,3 +79,7 @@ WantedBy=multi-user.target
 ## CUDA (`cuda`)
 
 `cuda-probe` -> `/var/lib/fake_usr/lib`
+
+```
+CUDA_CACHE_DISABLE=1 timeout 60 /var/lib/fake_usr/lib/cuda-probe --all-tests
+```
