@@ -83,3 +83,21 @@ WantedBy=multi-user.target
 ```
 CUDA_CACHE_DISABLE=1 timeout 60 /var/lib/fake_usr/lib/cuda-probe --all-tests
 ```
+
+### Reboot without CUDA Panic
+
+Generally, the Linux is under a hypervisor of driver os to be safe. The standard `reboot now` command may leads to GPU ACR init failure, e.g.,
+
+```
+HS ucode boot failed, err 1b
+ACR register access failure
+ACR bootstrap failed
+Failed initialization for: g->ops.acr.acr_construct_execute
+```
+
+A better way to fix (or reboot the system) is via hypervisor reboot:
+
+```sh
+sync
+echo 1 > /sys/class/tegra_hv_pm_ctl/tegra_hv_pm_ctl/device/trigger_sys_reboot
+```
