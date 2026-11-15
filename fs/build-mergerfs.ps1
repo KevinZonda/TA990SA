@@ -15,6 +15,7 @@ if (-not $BuilderImage) {
 }
 $sourcePath = Join-Path $PSScriptRoot 'mergerfs'
 $outputPath = Join-Path $PSScriptRoot "artifacts\mergerfs-2.42.0-aarch64-gcc$CompilerVersion"
+$binaryOutputPath = Join-Path $PSScriptRoot 'build'
 $expectedCommit = 'ce3737ff3314ee0eb5edc38720b1a3f1fcb0e153'
 $actualCommit = git -C $sourcePath rev-parse HEAD
 if ($LASTEXITCODE -ne 0 -or $actualCommit.Trim() -ne $expectedCommit) {
@@ -59,3 +60,17 @@ $metadata = [ordered]@{
     deployment = 'Not deployed to Orin; no mount tests performed.'
 }
 [IO.File]::WriteAllText((Join-Path $outputPath 'build-info.json'), ($metadata | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
+
+# Publish verified binaries at the stable paths used for deployment.
+# Versioned artifacts retain the build logs, checksums, and historical binaries.
+New-Item -ItemType Directory -Path $binaryOutputPath -Force | Out-Null
+foreach ($binaryName in @('mergerfs', 'mergerfs-fusermount', 'mount.mergerfs')) {
+    $builtBinary = Join-Path $outputPath $binaryName
+    $publishedBinary = Join-Path $binaryOutputPath $binaryName
+    Copy-Item -LiteralPath $builtBinary -Destination $publishedBinary -Force
+    if ((Get-FileHash -LiteralPath $builtBinary -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $publishedBinary -Algorithm SHA256).Hash) {
+        throw "Published binary checksum mismatch: $binaryName"
+    }
+}
+Write-Output "Verified binaries published to $binaryOutputPath"
