@@ -1,3 +1,8 @@
-FROM alpine:3.22
-RUN apk add --no-cache build-base linux-headers binutils file
+ARG ALPINE_VERSION=3.23
+FROM alpine:${ALPINE_VERSION}
+ARG GCC_VERSION=15.2.0
+RUN apk add --no-cache build-base linux-headers binutils file \
+    "gcc~${GCC_VERSION}" "g++~${GCC_VERSION}" \
+    && test "$(gcc -dumpfullversion -dumpversion)" = "${GCC_VERSION}" \
+    && test "$(g++ -dumpfullversion -dumpversion)" = "${GCC_VERSION}"
 ENTRYPOINT ["/bin/sh", "/scripts/build-mergerfs.sh"]

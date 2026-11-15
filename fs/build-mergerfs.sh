@@ -3,8 +3,15 @@ set -eu
 
 VERSION=2.42.0
 JOBS=${JOBS:-4}
+EXPECTED_GCC_VERSION=${EXPECTED_GCC_VERSION:-15.2.0}
 BUILD_DIR=/tmp/ta990sa-mergerfs
 OUT=/output
+
+ACTUAL_GCC_VERSION=$(g++ -dumpfullversion -dumpversion)
+if [ "$ACTUAL_GCC_VERSION" != "$EXPECTED_GCC_VERSION" ]; then
+    printf 'Expected GCC %s, found %s\n' "$EXPECTED_GCC_VERSION" "$ACTUAL_GCC_VERSION" >&2
+    exit 1
+fi
 
 mkdir -p "$BUILD_DIR" "$OUT"
 cp -a /source/. "$BUILD_DIR/"
@@ -35,9 +42,11 @@ cp build/mergerfs vendored/libfuse/build/mergerfs-fusermount vendored/libfuse/bu
     readelf -h "$OUT/mergerfs"
     readelf -l "$OUT/mergerfs"
     readelf -d "$OUT/mergerfs"
+    readelf -p .comment "$OUT/mergerfs"
 } > "$OUT/verification.txt" 2>&1
 
 cd "$OUT"
 sha256sum mergerfs mergerfs-fusermount mount.mergerfs > SHA256SUMS
+cp /source/LICENSE "$OUT/LICENSE"
 cat verification.txt
 cat SHA256SUMS
