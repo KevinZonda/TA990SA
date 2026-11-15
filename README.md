@@ -75,3 +75,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+## CUDA (`cuda`)
+
+`cuda-probe` -> `/var/lib/fake_usr/lib`
